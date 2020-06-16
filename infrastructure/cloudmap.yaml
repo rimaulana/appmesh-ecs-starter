@@ -1,0 +1,115 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Amazon CloudMap for AppMesh sample (https://github.com/rimaulana/appmesh-ecs-starter)
+
+Parameters:
+
+  ClusterName:
+    Type: String
+    Description: Give the name of ECS cluster
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+Resources:
+  ServiceDiscovery:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties: 
+      Description: appmesh-sample private service discovery namespace
+      Name: !Sub "${ClusterName}.lab"
+      Vpc: !Ref VpcId
+  
+  FrontendEC2ServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      Description: appmesh-sample EC2 frontend service discovery
+      DnsConfig:
+        DnsRecords: 
+        - TTL: 10
+          Type: A
+        RoutingPolicy: MULTIVALUE
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: frontend-ec2
+      NamespaceId: !Ref ServiceDiscovery
+  
+  FrontendECSServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      Description: appmesh-sample ECS frontend service discovery
+      DnsConfig:
+        DnsRecords: 
+        - TTL: 10
+          Type: A
+        RoutingPolicy: MULTIVALUE
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: frontend-ecs
+      NamespaceId: !Ref ServiceDiscovery
+  
+  FrontendServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      Description: appmesh-sample frontend service discovery
+      DnsConfig:
+        DnsRecords: 
+        - TTL: 10
+          Type: A
+        RoutingPolicy: MULTIVALUE
+      Name: frontend
+      NamespaceId: !Ref ServiceDiscovery
+  
+  Backendv1ServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      Description: appmesh-sample backend v1 service discovery
+      DnsConfig:
+        DnsRecords: 
+        - TTL: 10
+          Type: A
+        RoutingPolicy: MULTIVALUE
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: backend-v1
+      NamespaceId: !Ref ServiceDiscovery
+  
+  Backendv2ServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      Description: appmesh-sample backend v2 service discovery
+      DnsConfig:
+        DnsRecords: 
+        - TTL: 10
+          Type: A
+        RoutingPolicy: MULTIVALUE
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: backend-v2
+      NamespaceId: !Ref ServiceDiscovery
+  
+  BackendServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      Description: appmesh-sample backend service discovery
+      DnsConfig:
+        DnsRecords: 
+        - TTL: 10
+          Type: A
+        RoutingPolicy: MULTIVALUE
+      Name: backend
+      NamespaceId: !Ref ServiceDiscovery
+  
+  FrontendServiceDiscoveryInstance:
+    Type: AWS::ServiceDiscovery::Instance
+    Properties: 
+      InstanceAttributes: 
+        AWS_INSTANCE_IPV4: 1.1.1.1
+      ServiceId: !Ref FrontendServiceDiscoveryService
+  
+  BackendServiceDiscoveryInstance:
+    Type: AWS::ServiceDiscovery::Instance
+    Properties: 
+      InstanceAttributes: 
+        AWS_INSTANCE_IPV4: 2.2.2.2
+      ServiceId: !Ref BackendServiceDiscoveryService

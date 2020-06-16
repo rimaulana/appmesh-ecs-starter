@@ -1,0 +1,70 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Main CloudFormation stack for deploying AppMesh sample (https://github.com/rimaulana/appmesh-ecs-starter)
+
+Parameters:
+  BucketName:
+    Type: String
+  BucketRegion:
+    Type: String
+  S3PrefixNameParameter:
+    Type: String
+  ClusterName:
+    Type: String
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+  AllowSSHFrom:
+    Type: String
+    Description: Range of addresses allowed to SSH into Bastion
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    Default: 0.0.0.0/0
+  
+
+Resources:
+  Vpc:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}vpc.yaml'
+      Parameters:
+        ClusterName: !Ref ClusterName
+        AllowSSHFrom: !Ref AllowSSHFrom
+  
+  ECSCluster:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}cluster.yaml'
+      Parameters:
+        ClusterName: !Ref ClusterName
+        KeyName: !Ref KeyName
+        SecurityGroupId:
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.ECSContainerInstanceSecurityGroup
+        SubnetIds: 
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.PublicSubnetIds
+  
+  CloudMap:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}cloudmap.yaml'
+      Parameters:
+        ClusterName: !Ref ClusterName
+        VpcId:
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.Id
+  
+  Mesh:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}appmesh.yaml'
+      Parameters:
+        ClusterName: !Ref ClusterName

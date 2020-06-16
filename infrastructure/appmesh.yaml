@@ -1,0 +1,193 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Amazon AppMesh sample (https://github.com/rimaulana/appmesh-ecs-starter)
+
+Parameters:
+  ClusterName:
+    Type: String
+
+Resources:
+  Mesh:
+    Type: AWS::AppMesh::Mesh
+    Properties: 
+      MeshName: !Ref ClusterName
+      Spec: 
+        EgressFilter: 
+          Type: DROP_ALL
+      Tags: 
+      - Key: Name
+        Value: !Sub '${ClusterName}-in-${AWS::Region}'
+      - Key: auto-delete
+        Value: "no"
+  
+  FrontendEC2VirtualNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties: 
+      MeshName:
+        Fn::GetAtt: Mesh.MeshName
+      Spec: 
+        Backends: 
+        - VirtualService:
+            VirtualServiceName:
+              Fn::Sub: 'backend.${ClusterName}.lab'
+        Listeners: 
+        - HealthCheck: 
+            HealthyThreshold: 3
+            IntervalMillis: 10000
+            Path: /
+            Port: 80
+            Protocol: http
+            TimeoutMillis: 5000
+            UnhealthyThreshold: 2
+          PortMapping: 
+            Port: 80
+            Protocol: http
+        ServiceDiscovery: 
+          DNS:
+            Hostname: 
+              Fn::Sub: 'frontend-ec2.${ClusterName}.lab'
+      Tags: 
+      - Key: auto-delete
+        Value: "no"
+      VirtualNodeName: frontend-ec2
+
+  FrontendECSVirtualNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties: 
+      MeshName:
+        Fn::GetAtt: Mesh.MeshName
+      Spec: 
+        Backends: 
+        - VirtualService:
+            VirtualServiceName:
+              Fn::Sub: 'backend.${ClusterName}.lab'
+        Listeners: 
+        - HealthCheck: 
+            HealthyThreshold: 3
+            IntervalMillis: 10000
+            Path: /
+            Port: 80
+            Protocol: http
+            TimeoutMillis: 5000
+            UnhealthyThreshold: 2
+          PortMapping: 
+            Port: 80
+            Protocol: http
+        ServiceDiscovery: 
+          DNS:
+            Hostname: 
+              Fn::Sub: 'frontend-ecs.${ClusterName}.lab'
+      Tags: 
+      - Key: auto-delete
+        Value: "no"
+      VirtualNodeName: frontend-ecs
+
+  Backendv1VirtualNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties: 
+      MeshName:
+        Fn::GetAtt: Mesh.MeshName
+      Spec: 
+        Listeners: 
+        - HealthCheck: 
+            HealthyThreshold: 3
+            IntervalMillis: 10000
+            Path: /
+            Port: 8080
+            Protocol: http
+            TimeoutMillis: 5000
+            UnhealthyThreshold: 2
+          PortMapping: 
+            Port: 8080
+            Protocol: http
+        ServiceDiscovery: 
+          DNS:
+            Hostname: 
+              Fn::Sub: 'backend-v1.${ClusterName}.lab'
+      Tags: 
+      - Key: auto-delete
+        Value: "no"
+      VirtualNodeName: backend-v1
+
+  Backendv2VirtualNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties: 
+      MeshName:
+        Fn::GetAtt: Mesh.MeshName
+      Spec: 
+        Listeners: 
+        - HealthCheck: 
+            HealthyThreshold: 3
+            IntervalMillis: 10000
+            Path: /
+            Port: 9080
+            Protocol: http
+            TimeoutMillis: 5000
+            UnhealthyThreshold: 2
+          PortMapping: 
+            Port: 9080
+            Protocol: http
+        ServiceDiscovery: 
+          DNS:
+            Hostname: 
+              Fn::Sub: 'backend-v2.${ClusterName}.lab'
+      Tags: 
+      - Key: auto-delete
+        Value: "no"
+      VirtualNodeName: backend-v2
+
+  BackendVirtualRouter:
+    Type: AWS::AppMesh::VirtualRouter
+    Properties: 
+      MeshName:
+        Fn::GetAtt: Mesh.MeshName
+      Spec: 
+        Listeners:
+        - PortMapping:
+            Port: 3000
+            Protocol: http
+      Tags: 
+      - Key: auto-delete
+        Value: "no"
+      VirtualRouterName: backend-vrouter
+
+  BackendVirtualService:
+    Type: AWS::AppMesh::VirtualService
+    Properties: 
+      MeshName:
+        Fn::GetAtt: Mesh.MeshName
+      Spec: 
+        Provider:
+          VirtualRouter:
+            VirtualRouterName: 
+              Fn::GetAtt: BackendVirtualRouter.VirtualRouterName
+      Tags: 
+      - Key: auto-delete
+        Value: "no"
+      VirtualServiceName:
+        Fn::Sub: 'backend.${ClusterName}.lab'
+  
+  BackendVirtualRoute:
+    Type: AWS::AppMesh::Route
+    Properties: 
+      MeshName:
+        Fn::GetAtt: Mesh.MeshName
+      RouteName: backend-v1
+      Spec: 
+        HttpRoute:
+          Action: 
+            WeightedTargets:
+            - VirtualNode:
+                Fn::GetAtt: Backendv1VirtualNode.VirtualNodeName
+              Weight: 50
+            - VirtualNode:
+                Fn::GetAtt: Backendv2VirtualNode.VirtualNodeName
+              Weight: 50
+          Match: 
+            Prefix: /
+      Tags: 
+      - Key: auto-delete
+        Value: "no"
+      VirtualRouterName:
+        Fn::GetAtt: BackendVirtualRouter.VirtualRouterName

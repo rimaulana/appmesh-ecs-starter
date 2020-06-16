@@ -1,0 +1,104 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Amazon ECS Cluster for AppMesh sample (https://github.com/rimaulana/appmesh-ecs-starter)
+
+Parameters:
+
+  ClusterName:
+    Type: String
+    Description: Give the name of ECS cluster
+  
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+  
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+  
+  SecurityGroupId:
+    Type: String
+  
+  SubnetIds:
+    Type: String
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties: 
+      ClusterName: !Ref ClusterName
+      Tags: 
+      - Key: Name
+        Value: !Sub '${ClusterName}-in-${AWS::Region}'
+      - Key: auto-delete
+        Value: "no"
+  
+  NodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - !Ref NodeInstanceRole
+
+  NodeInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  NodeLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true 
+      IamInstanceProfile: !Ref NodeInstanceProfile
+      ImageId: !Ref AmiId
+      InstanceType: t3a.medium
+      KeyName: !Ref KeyName
+      SecurityGroups:
+      - !Ref SecurityGroupId
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 50
+            VolumeType: gp2
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            echo ECS_CLUSTER=${ClusterName} >> /etc/ecs/ecs.config;
+            echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
+  
+  ContainerInstanceAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: "3"
+      LaunchConfigurationName: !Ref NodeLaunchConfig
+      MinSize: "1"
+      MaxSize: "3"
+      VPCZoneIdentifier:
+        Fn::Split:
+        - ','
+        - !Ref SubnetIds
+      Tags:
+      - Key: Name
+        Value: !Sub "${ClusterName}-container-instance"
+        PropagateAtLaunch: true
+      - Key: auto-delete
+        Value: "no"
+        PropagateAtLaunch: true
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 5
