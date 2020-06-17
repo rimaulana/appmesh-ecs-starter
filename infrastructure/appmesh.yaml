@@ -43,6 +43,10 @@ Resources:
           PortMapping: 
             Port: 80
             Protocol: http
+        # Logging:
+        #   AccessLog:
+        #     File:
+        #       Path: /var/log/envoy-access.log
         ServiceDiscovery: 
           DNS:
             Hostname: 
@@ -74,6 +78,10 @@ Resources:
           PortMapping: 
             Port: 80
             Protocol: http
+        # Logging:
+        #   AccessLog:
+        #     File:
+        #       Path: /var/log/envoy-access.log
         ServiceDiscovery: 
           DNS:
             Hostname: 
@@ -101,6 +109,10 @@ Resources:
           PortMapping: 
             Port: 8080
             Protocol: http
+        # Logging:
+        #   AccessLog:
+        #     File:
+        #       Path: /var/log/envoy-access.log
         ServiceDiscovery: 
           DNS:
             Hostname: 
@@ -128,6 +140,10 @@ Resources:
           PortMapping: 
             Port: 9080
             Protocol: http
+        # Logging:
+        #   AccessLog:
+        #     File:
+        #       Path: /var/log/envoy-access.log
         ServiceDiscovery: 
           DNS:
             Hostname: 

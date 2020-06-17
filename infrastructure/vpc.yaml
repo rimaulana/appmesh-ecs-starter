@@ -515,6 +515,14 @@ Outputs:
     Description: >-
       Security group for worker nodes
     Value: !Ref ContainerInstanceSecurityGroup
+  
+  ECSWorkloadSecurityGroup:
+    Description: >-
+      Security group for ECS workload
+    Value: !Ref WorkloadSecurityGroup
+  
+  ALBTargetGroupArn:
+    Value: !Ref WorkloadTargetGroup
 
   Id:
     Description: >-

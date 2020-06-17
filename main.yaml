@@ -15,6 +15,9 @@ Parameters:
   KeyName:
     Description: The EC2 Key Pair to allow SSH access to the instances
     Type: AWS::EC2::KeyPair::KeyName
+  EnvoyImageTag:
+    Type: String
+    Default: v1.12.3.0-prod
   AllowSSHFrom:
     Type: String
     Description: Range of addresses allowed to SSH into Bastion
@@ -60,6 +63,35 @@ Resources:
           Fn::GetAtt:
           - Vpc
           - Outputs.Id
+  
+  ECSWorkload:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}ecs-workload.yaml'
+      Parameters:
+        ClusterName: !Ref ClusterName
+        EnvoyImageTag: !Ref EnvoyImageTag
+        SecurityGroupId:
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.ECSWorkloadSecurityGroup
+        SubnetIds:
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.PrivateSubnetIds
+        ALBTargetGroupArn:
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.ALBTargetGroupArn
+        FrontendServiceDiscoveryArn:
+          Fn::GetAtt:
+          - CloudMap
+          - Outputs.ECSFrontendRegistryArn
+        BackendServiceDiscoveryArn:
+          Fn::GetAtt:
+          - CloudMap
+          - Outputs.Backendv2RegistryArn
   
   Mesh:
     Type: AWS::CloudFormation::Stack

@@ -1,0 +1,248 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Amazon ECS task definition and service for AppMesh sample (https://github.com/rimaulana/appmesh-ecs-starter)
+
+Parameters:
+  ClusterName:
+    Type: String
+    Description: Give the name of ECS cluster
+  EnvoyImageTag:
+    Type: String
+    Default: v1.12.3.0-prod
+  SecurityGroupId:
+    Type: String
+  SubnetIds:
+    Type: String
+  ALBTargetGroupArn:
+    Type: String
+  FrontendServiceDiscoveryArn:
+    Type: String
+  BackendServiceDiscoveryArn:
+    Type: String
+
+Resources:
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ecs-tasks.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/CloudWatchFullAccess
+      - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+
+  FrontendECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties: 
+      ContainerDefinitions: 
+      - DependsOn: 
+        - Condition: HEALTHY
+          ContainerName: appmesh-envoy
+        Environment: 
+        - Name: PORT
+          Value: "80"
+        Essential: true
+        Image: nginx
+        MemoryReservation: 128
+        Name: nginx
+        PortMappings: 
+        - ContainerPort: 80
+          Protocol: tcp
+      - Essential: true
+        Image: amazon/aws-xray-daemon
+        MemoryReservation: 128
+        Name: xray-daemon
+        PortMappings: 
+        - ContainerPort: 2000
+          Protocol: tcp
+        - ContainerPort: 2000
+          Protocol: udp
+      - Environment: 
+        - Name: APPMESH_VIRTUAL_NODE_NAME
+          Value: !Sub "mesh/${ClusterName}/virtualNode/frontend-ecs"
+        - Name: ENABLE_ENVOY_XRAY_TRACING
+          Value: "1"
+        - Name: ENVOY_LOG_LEVEL
+          Value: debug
+        Essential: true
+        HealthCheck: 
+          Command: 
+          - "CMD-SHELL"
+          - "curl -s http://localhost:9901/server_info | grep state | grep -q LIVE"
+          Interval: 5
+          Retries: 3
+          StartPeriod: 10
+          Timeout: 2
+        Image: 
+          Fn::Sub: "840364872350.dkr.ecr.${AWS::Region}.amazonaws.com/aws-appmesh-envoy:${EnvoyImageTag}"
+        Memory: 512
+        Name: appmesh-envoy
+        User: "1337"
+      NetworkMode: awsvpc
+      ProxyConfiguration: 
+        ContainerName: appmesh-envoy
+        ProxyConfigurationProperties: 
+        - Name: IgnoredUID
+          Value: "1337"
+        - Name: AppPorts
+          Value: "80"
+        - Name: ProxyIngressPort
+          Value: "15000"
+        - Name: ProxyEgressPort
+          Value: "15001"
+        - Name: EgressIgnoredIPs
+          Value: 169.254.170.2,169.254.169.254
+        Type: APPMESH
+      RequiresCompatibilities: 
+      - EC2
+      Tags: 
+      - Key: Name
+        Value: !Sub "${ClusterName}-frontend-ecs-task-definition"
+      - Key: auto-delete
+        Value: "no"
+      TaskRoleArn: !GetAtt TaskRole.Arn
+  
+  FrontendECSService:
+    Type: AWS::ECS::Service
+    Properties: 
+      Cluster: !Ref ClusterName
+      DeploymentConfiguration: 
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      HealthCheckGracePeriodSeconds: 10
+      LaunchType: EC2
+      LoadBalancers: 
+      - ContainerName: nginx
+        ContainerPort: 80
+        TargetGroupArn: !Ref ALBTargetGroupArn
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: 
+          - !Ref SecurityGroupId
+          Subnets: 
+            Fn::Split:
+            - ','
+            - !Ref SubnetIds
+      PlacementStrategies: 
+      - Field: attribute:ecs.availability-zone
+        Type: spread
+      SchedulingStrategy: REPLICA
+      ServiceRegistries:
+      - ContainerName: nginx
+        RegistryArn: !Ref FrontendServiceDiscoveryArn
+      TaskDefinition: !Ref FrontendECSTaskDefinition
+  
+  Backendv2TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties: 
+      ContainerDefinitions: 
+      - DependsOn: 
+        - Condition: HEALTHY
+          ContainerName: appmesh-envoy
+        Environment: 
+        - Name: PORT
+          Value: "9080"
+        - Name: VERSION
+          Value: v2
+        Essential: true
+        Image: rimaulana/appmesh-backend-sample
+        MemoryReservation: 128
+        Name: backend
+        PortMappings: 
+        - ContainerPort: 9080
+          Protocol: tcp
+      - Essential: true
+        Image: amazon/aws-xray-daemon
+        MemoryReservation: 128
+        Name: xray-daemon
+        PortMappings: 
+        - ContainerPort: 2000
+          Protocol: tcp
+        - ContainerPort: 2000
+          Protocol: udp
+      - Environment: 
+        - Name: APPMESH_VIRTUAL_NODE_NAME
+          Value: !Sub "mesh/${ClusterName}/virtualNode/backend-v2"
+        - Name: ENABLE_ENVOY_XRAY_TRACING
+          Value: "1"
+        - Name: ENVOY_LOG_LEVEL
+          Value: debug
+        Essential: true
+        HealthCheck: 
+          Command: 
+          - "CMD-SHELL"
+          - "curl -s http://localhost:9901/server_info | grep state | grep -q LIVE"
+          Interval: 5
+          Retries: 3
+          StartPeriod: 10
+          Timeout: 2
+        Image: 
+          Fn::Sub: "840364872350.dkr.ecr.${AWS::Region}.amazonaws.com/aws-appmesh-envoy:${EnvoyImageTag}"
+        Memory: 512
+        Name: appmesh-envoy
+        User: "1337"
+      NetworkMode: awsvpc
+      ProxyConfiguration: 
+        ContainerName: appmesh-envoy
+        ProxyConfigurationProperties: 
+        - Name: IgnoredUID
+          Value: "1337"
+        - Name: AppPorts
+          Value: "9080"
+        - Name: ProxyIngressPort
+          Value: "15000"
+        - Name: ProxyEgressPort
+          Value: "15001"
+        - Name: EgressIgnoredIPs
+          Value: 169.254.170.2,169.254.169.254
+        Type: APPMESH
+      RequiresCompatibilities: 
+      - EC2
+      Tags: 
+      - Key: Name
+        Value: !Sub "${ClusterName}-frontend-ecs-task-definition"
+      - Key: auto-delete
+        Value: "no"
+      TaskRoleArn: !GetAtt TaskRole.Arn
+  
+  Backendv2Service:
+    Type: AWS::ECS::Service
+    Properties: 
+      Cluster: !Ref ClusterName
+      DeploymentConfiguration: 
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 2
+      LaunchType: EC2
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: 
+          - !Ref SecurityGroupId
+          Subnets: 
+            Fn::Split:
+            - ','
+            - !Ref SubnetIds
+      PlacementStrategies: 
+      - Field: attribute:ecs.availability-zone
+        Type: spread
+      SchedulingStrategy: REPLICA
+      ServiceRegistries:
+      - ContainerName: backend
+        RegistryArn: !Ref BackendServiceDiscoveryArn
+      TaskDefinition: !Ref Backendv2TaskDefinition

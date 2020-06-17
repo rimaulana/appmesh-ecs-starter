@@ -48,18 +48,6 @@ Resources:
       Name: frontend-ecs
       NamespaceId: !Ref ServiceDiscovery
   
-  FrontendServiceDiscoveryService:
-    Type: AWS::ServiceDiscovery::Service
-    Properties: 
-      Description: appmesh-sample frontend service discovery
-      DnsConfig:
-        DnsRecords: 
-        - TTL: 10
-          Type: A
-        RoutingPolicy: MULTIVALUE
-      Name: frontend
-      NamespaceId: !Ref ServiceDiscovery
-  
   Backendv1ServiceDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
     Properties: 
@@ -100,16 +88,22 @@ Resources:
       Name: backend
       NamespaceId: !Ref ServiceDiscovery
   
-  FrontendServiceDiscoveryInstance:
-    Type: AWS::ServiceDiscovery::Instance
-    Properties: 
-      InstanceAttributes: 
-        AWS_INSTANCE_IPV4: 1.1.1.1
-      ServiceId: !Ref FrontendServiceDiscoveryService
-  
   BackendServiceDiscoveryInstance:
     Type: AWS::ServiceDiscovery::Instance
     Properties: 
       InstanceAttributes: 
         AWS_INSTANCE_IPV4: 2.2.2.2
       ServiceId: !Ref BackendServiceDiscoveryService
+
+Outputs:
+  ECSFrontendRegistryArn:
+    Value: !GetAtt FrontendECSServiceDiscoveryService.Arn
+
+  EC2FrontendRegistryArn:
+    Value: !GetAtt FrontendEC2ServiceDiscoveryService.Arn
+  
+  Backendv2RegistryArn:
+    Value: !GetAtt Backendv2ServiceDiscoveryService.Arn
+
+  Backendv1RegistryArn:
+    Value: !GetAtt Backendv1ServiceDiscoveryService.Arn
