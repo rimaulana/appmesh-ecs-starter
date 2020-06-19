@@ -1,0 +1,123 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Amazon ECS task definition and service for AppMesh sample (https://github.com/rimaulana/appmesh-ecs-starter)
+
+Parameters:
+  ClusterName:
+    Type: String
+    Description: Give the name of ECS cluster
+  # EnvoyImageTag:
+  #   Type: String
+  #   Default: v1.12.3.0-prod
+  SecurityGroupId:
+    Type: String
+  SubnetIds:
+    Type: String
+  ALBTargetGroupArn:
+    Type: String
+  FrontendServiceDiscoveryArn:
+    Type: String
+  BackendServiceDiscoveryArn:
+    Type: String
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    Description: DO NOT CHANGE - this variable will configure proxy server AMI to the latest Amazon Linux 2 AMI ID
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+
+Resources:
+
+  WorkloadInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - !Ref WorkloadInstanceRole
+
+  WorkloadInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      Policies:
+      - PolicyName: ServiceDiscoveryRegister
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - servicediscovery:RegisterInstance
+            Resource:
+            - !Ref FrontendServiceDiscoveryArn
+            - !Ref BackendServiceDiscoveryArn
+      - PolicyName: ServiceDiscoveryUpdateHealthCheck
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - servicediscovery:UpdateInstanceCustomHealthStatus
+            Resource: "*"
+
+  FrontendLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true 
+      IamInstanceProfile: !Ref WorkloadInstanceProfile
+      ImageId: !Ref AmiId
+      InstanceType: t3a.medium
+      KeyName: !Ref KeyName
+      SecurityGroups:
+        Fn::Split:
+          - ','
+          - !Ref SecurityGroupId
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 50
+            VolumeType: gp2
+            DeleteOnTermination: true
+      # UserData:
+      #   Fn::Base64:
+      #     !Sub |
+      #       #!/bin/bash
+      #       echo ECS_CLUSTER=${ClusterName} >> /etc/ecs/ecs.config;
+      #       echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
+  
+  FrontendAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: "1"
+      LaunchConfigurationName: !Ref FrontendLaunchConfig
+      MinSize: "1"
+      MaxSize: "3"
+      VPCZoneIdentifier:
+        Fn::Split:
+        - ','
+        - !Ref SubnetIds
+      Tags:
+      - Key: Name
+        Value: !Sub "${ClusterName}-ec2-frontend"
+        PropagateAtLaunch: true
+      - Key: auto-delete
+        Value: "no"
+        PropagateAtLaunch: true
+      TargetGroupARNs:
+      - !Ref ALBTargetGroupArn
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 5

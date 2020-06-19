@@ -460,13 +460,18 @@ Resources:
     Properties:
       DefaultActions: 
       - Order: 1
-        TargetGroupArn: !Ref WorkloadTargetGroup
+        ForwardConfig:
+          TargetGroups: 
+          - TargetGroupArn: !Ref ECSWorkloadTargetGroup
+            Weight: 50
+          - TargetGroupArn: !Ref EC2WorkloadTargetGroup
+            Weight: 50
         Type: forward
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 80
       Protocol: HTTP
   
-  WorkloadTargetGroup:
+  ECSWorkloadTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties: 
       HealthCheckEnabled: true
@@ -482,10 +487,33 @@ Resources:
       Protocol: HTTP
       Tags: 
       - Key: Name
-        Value: "appmesh-ecs-starter-workload-target-group"
+        Value: "appmesh-ecs-starter-ecs-workload-target-group"
       - Key: auto-delete
         Value: "no"
       TargetType: ip
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VPC
+  
+  EC2WorkloadTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 3
+      HealthyThresholdCount: 3
+      Matcher: 
+        HttpCode: 200-399
+      Port: 80
+      Protocol: HTTP
+      Tags: 
+      - Key: Name
+        Value: "appmesh-ecs-starter-ec2-workload-target-group"
+      - Key: auto-delete
+        Value: "no"
+      TargetType: instance
       UnhealthyThresholdCount: 2
       VpcId: !Ref VPC
 
@@ -521,8 +549,11 @@ Outputs:
       Security group for ECS workload
     Value: !Ref WorkloadSecurityGroup
   
-  ALBTargetGroupArn:
-    Value: !Ref WorkloadTargetGroup
+  ECSALBTargetGroupArn:
+    Value: !Ref ECSWorkloadTargetGroup
+  
+  EC2ALBTargetGroupArn:
+    Value: !Ref EC2WorkloadTargetGroup
 
   Id:
     Description: >-

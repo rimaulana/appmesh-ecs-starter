@@ -83,7 +83,7 @@ Resources:
         ALBTargetGroupArn:
           Fn::GetAtt:
           - Vpc
-          - Outputs.ALBTargetGroupArn
+          - Outputs.ECSALBTargetGroupArn
         FrontendServiceDiscoveryArn:
           Fn::GetAtt:
           - CloudMap
@@ -92,6 +92,40 @@ Resources:
           Fn::GetAtt:
           - CloudMap
           - Outputs.Backendv2RegistryArn
+
+  EC2Workload:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}ec2-workload.yaml'
+      Parameters:
+        ClusterName: !Ref ClusterName
+        KeyName: !Ref KeyName
+        SecurityGroupId:
+          Fn::Join:
+          - ','
+          - - Fn::GetAtt:
+              - Vpc
+              - Outputs.ECSWorkloadSecurityGroup
+            - Fn::GetAtt:
+              - Vpc
+              - Outputs.ECSContainerInstanceSecurityGroup
+        SubnetIds:
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.PublicSubnetIds
+        ALBTargetGroupArn:
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.EC2ALBTargetGroupArn
+        FrontendServiceDiscoveryArn:
+          Fn::GetAtt:
+          - CloudMap
+          - Outputs.EC2FrontendRegistryArn
+        BackendServiceDiscoveryArn:
+          Fn::GetAtt:
+          - CloudMap
+          - Outputs.Backendv1RegistryArn
   
   Mesh:
     Type: AWS::CloudFormation::Stack
