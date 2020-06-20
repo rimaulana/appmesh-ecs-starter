@@ -7,9 +7,12 @@ Parameters:
   ClusterName:
     Type: String
     Description: Give the name of ECS cluster
-  # EnvoyImageTag:
-  #   Type: String
-  #   Default: v1.12.3.0-prod
+  EnvoyImageTag:
+    Type: String
+    Default: v1.12.3.0-prod
+  RegistryId:
+    Type: String
+    Default: "840364872350"
   SecurityGroupId:
     Type: String
   SubnetIds:
@@ -52,6 +55,8 @@ Resources:
       Path: "/"
       ManagedPolicyArns:
       - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
       Policies:
       - PolicyName: ServiceDiscoveryRegister
         PolicyDocument:
@@ -74,6 +79,54 @@ Resources:
 
   FrontendLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          install:
+          - configure_docker
+          - configure_ecr_account
+          - configure_xray
+        configure_xray:
+          commands:
+            01_download_xray_assets:
+              command:
+                Fn::Sub: "curl https://s3.${AWS::Region}.amazonaws.com/aws-xray-assets.${AWS::Region}/xray-daemon/aws-xray-daemon-3.x.rpm -o /home/ec2-user/xray.rpm"
+            02_install_xray:
+              command: yum install -y /home/ec2-user/xray.rpm
+            03_delete_xray_installer:
+              command: rm -rf /home/ec2-user/xray.rpm
+          services:
+            sysvinit:
+              x-ray:
+                enabled: true 
+                ensureRunning: true
+        configure_ecr_account:
+          commands:
+            01_generate_login:
+              command: 
+                Fn::Sub: "aws ecr get-login --registry-ids ${RegistryId} --no-include-email --region ${AWS::Region} > /home/ec2-user/ecr-login.sh"
+            02_configure_executeable:
+              command: chmod +x /home/ec2-user/ecr-login.sh
+            03_execute_login:
+              command: bash /home/ec2-user/ecr-login.sh
+            05_pull_envoy_image:
+              command: 
+                Fn::Sub: "docker pull ${RegistryId}.dkr.ecr.${AWS::Region}.amazonaws.com/aws-appmesh-envoy:${EnvoyImageTag}"
+            04_delete_script:
+              command: rm -rf /home/ec2-user/ecr-login.sh
+        configure_docker:
+          commands:
+            01_update_yum:
+              command: yum update -y
+            02_install_docker:
+              command: amazon-linux-extras install docker
+            03_configure_permission:
+              command: usermod -a -G docker ec2-user
+          services:
+            sysvinit:
+              docker:
+                enabled: true 
+                ensureRunning: true 
     Properties:
       AssociatePublicIpAddress: true 
       IamInstanceProfile: !Ref WorkloadInstanceProfile
@@ -90,12 +143,13 @@ Resources:
             VolumeSize: 50
             VolumeType: gp2
             DeleteOnTermination: true
-      # UserData:
-      #   Fn::Base64:
-      #     !Sub |
-      #       #!/bin/bash
-      #       echo ECS_CLUSTER=${ClusterName} >> /etc/ecs/ecs.config;
-      #       echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            set -o xtrace
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource FrontendLaunchConfig --configsets install --region ${AWS::Region}
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource FrontendAutoScalingGroup --region ${AWS::Region}
   
   FrontendAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -117,6 +171,10 @@ Resources:
         PropagateAtLaunch: true
       TargetGroupARNs:
       - !Ref ALBTargetGroupArn
+    # CreationPolicy:
+    #   ResourceSignal:
+    #     Count: !Ref ProxyNumber
+    #     Timeout: PT10M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: 1
