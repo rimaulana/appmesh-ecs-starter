@@ -84,10 +84,10 @@ Resources:
           Fn::GetAtt:
           - Vpc
           - Outputs.ECSALBTargetGroupArn
-        FrontendServiceDiscoveryArn:
-          Fn::GetAtt:
-          - CloudMap
-          - Outputs.ECSFrontendRegistryArn
+        # FrontendServiceDiscoveryArn:
+        #   Fn::GetAtt:
+        #   - CloudMap
+        #   - Outputs.ECSFrontendRegistryArn
         BackendServiceDiscoveryArn:
           Fn::GetAtt:
           - CloudMap
@@ -118,10 +118,10 @@ Resources:
           Fn::GetAtt:
           - Vpc
           - Outputs.EC2ALBTargetGroupArn
-        FrontendServiceDiscoveryArn:
-          Fn::GetAtt:
-          - CloudMap
-          - Outputs.EC2FrontendRegistryArn
+        # FrontendServiceDiscoveryArn:
+        #   Fn::GetAtt:
+        #   - CloudMap
+        #   - Outputs.EC2FrontendRegistryArn
         BackendServiceDiscoveryArn:
           Fn::GetAtt:
           - CloudMap

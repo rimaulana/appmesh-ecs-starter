@@ -499,7 +499,7 @@ Resources:
     Properties: 
       HealthCheckEnabled: true
       HealthCheckIntervalSeconds: 5
-      HealthCheckPath: /
+      HealthCheckPath: /health
       HealthCheckPort: traffic-port
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 3
