@@ -16,8 +16,8 @@ Parameters:
     Type: String
   ALBTargetGroupArn:
     Type: String
-  FrontendServiceDiscoveryArn:
-    Type: String
+  # FrontendServiceDiscoveryArn:
+  #   Type: String
   BackendServiceDiscoveryArn:
     Type: String
 
@@ -48,12 +48,31 @@ Resources:
         - Condition: HEALTHY
           ContainerName: appmesh-envoy
         Environment: 
-        - Name: PORT
+        - Name: ENABLE_XRAY_TRACING
+          Value: "true"
+        - Name: APP_TYPE
+          Value: "frontend"
+        - Name: APP_VERSION
+          Value: "ecs"
+        - Name: APP_PORT
           Value: "80"
+        - Name: APP_PATH
+          Value: "frontend"
+        - Name: APP_BACKENDS
+          Value: 
+            Fn::Sub: "http://backend.${ClusterName}.lab:3000/backend;http://backend.${ClusterName}.lab:3000/backend"
         Essential: true
-        Image: nginx
+        HealthCheck: 
+          Command: 
+          - "CMD-SHELL"
+          - "curl -f http://localhost:80/health || exit 1"
+          Interval: 5
+          Retries: 3
+          StartPeriod: 10
+          Timeout: 2
+        Image: rimaulana/appmesh-ecs-starter
         MemoryReservation: 128
-        Name: nginx
+        Name: frontend
         PortMappings: 
         - ContainerPort: 80
           Protocol: tcp
@@ -124,7 +143,7 @@ Resources:
       HealthCheckGracePeriodSeconds: 10
       LaunchType: EC2
       LoadBalancers: 
-      - ContainerName: nginx
+      - ContainerName: frontend
         ContainerPort: 80
         TargetGroupArn: !Ref ALBTargetGroupArn
       NetworkConfiguration: 
@@ -140,9 +159,6 @@ Resources:
       - Field: attribute:ecs.availability-zone
         Type: spread
       SchedulingStrategy: REPLICA
-      ServiceRegistries:
-      - ContainerName: nginx
-        RegistryArn: !Ref FrontendServiceDiscoveryArn
       TaskDefinition: !Ref FrontendECSTaskDefinition
   
   Backendv2TaskDefinition:
@@ -152,13 +168,27 @@ Resources:
       - DependsOn: 
         - Condition: HEALTHY
           ContainerName: appmesh-envoy
-        Environment: 
-        - Name: PORT
+        Environment:
+        - Name: ENABLE_XRAY_TRACING
+          Value: "true"
+        - Name: APP_TYPE
+          Value: "backend"
+        - Name: APP_VERSION
+          Value: "v2"
+        - Name: APP_PORT
           Value: "9080"
-        - Name: VERSION
-          Value: v2
+        - Name: APP_PATH
+          Value: "backend"
         Essential: true
-        Image: rimaulana/appmesh-backend-sample
+        HealthCheck: 
+          Command: 
+          - "CMD-SHELL"
+          - "curl -f http://localhost:9080/health || exit 1"
+          Interval: 5
+          Retries: 3
+          StartPeriod: 10
+          Timeout: 2
+        Image: rimaulana/appmesh-ecs-starter
         MemoryReservation: 128
         Name: backend
         PortMappings: 
@@ -213,7 +243,7 @@ Resources:
       - EC2
       Tags: 
       - Key: Name
-        Value: !Sub "${ClusterName}-frontend-ecs-task-definition"
+        Value: !Sub "${ClusterName}-backend-ecs-task-definition"
       - Key: auto-delete
         Value: "no"
       TaskRoleArn: !GetAtt TaskRole.Arn

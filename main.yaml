@@ -93,11 +93,11 @@ Resources:
           - CloudMap
           - Outputs.Backendv2RegistryArn
 
-  EC2Workload:
+  EC2Frontend:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL:
-        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}ec2-workload.yaml'
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}ec2-frontend.yaml'
       Parameters:
         ClusterName: !Ref ClusterName
         KeyName: !Ref KeyName
@@ -118,10 +118,28 @@ Resources:
           Fn::GetAtt:
           - Vpc
           - Outputs.EC2ALBTargetGroupArn
-        # FrontendServiceDiscoveryArn:
-        #   Fn::GetAtt:
-        #   - CloudMap
-        #   - Outputs.EC2FrontendRegistryArn
+
+  EC2Backend:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}ec2-backend.yaml'
+      Parameters:
+        ClusterName: !Ref ClusterName
+        KeyName: !Ref KeyName
+        SecurityGroupId:
+          Fn::Join:
+          - ','
+          - - Fn::GetAtt:
+              - Vpc
+              - Outputs.ECSWorkloadSecurityGroup
+            - Fn::GetAtt:
+              - Vpc
+              - Outputs.ECSContainerInstanceSecurityGroup
+        SubnetIds:
+          Fn::GetAtt:
+          - Vpc
+          - Outputs.PublicSubnetIds
         BackendServiceDiscoveryArn:
           Fn::GetAtt:
           - CloudMap

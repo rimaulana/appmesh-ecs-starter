@@ -35,7 +35,7 @@ Resources:
         - HealthCheck: 
             HealthyThreshold: 3
             IntervalMillis: 10000
-            Path: /
+            Path: /health
             Port: 80
             Protocol: http
             TimeoutMillis: 5000
@@ -70,7 +70,7 @@ Resources:
         - HealthCheck: 
             HealthyThreshold: 3
             IntervalMillis: 10000
-            Path: /
+            Path: /health
             Port: 80
             Protocol: http
             TimeoutMillis: 5000
@@ -101,7 +101,7 @@ Resources:
         - HealthCheck: 
             HealthyThreshold: 3
             IntervalMillis: 10000
-            Path: /
+            Path: /health
             Port: 8080
             Protocol: http
             TimeoutMillis: 5000
@@ -132,7 +132,7 @@ Resources:
         - HealthCheck: 
             HealthyThreshold: 3
             IntervalMillis: 10000
-            Path: /
+            Path: /health
             Port: 9080
             Protocol: http
             TimeoutMillis: 5000

@@ -1,0 +1,225 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Amazon ECS task definition and service for AppMesh sample (https://github.com/rimaulana/appmesh-ecs-starter)
+
+Parameters:
+  ClusterName:
+    Type: String
+    Description: Give the name of ECS cluster
+  EnvoyImageTag:
+    Type: String
+    Default: v1.12.3.0-prod
+  RegistryId:
+    Type: String
+    Default: "840364872350"
+  SecurityGroupId:
+    Type: String
+  SubnetIds:
+    Type: String
+  ALBTargetGroupArn:
+    Type: String
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    Description: DO NOT CHANGE - this variable will configure proxy server AMI to the latest Amazon Linux 2 AMI ID
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+
+Resources:
+
+  WorkloadInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - !Ref WorkloadInstanceRole
+
+  WorkloadInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+
+  FrontendLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          install:
+          - configure_docker
+          - configure_ecr_account
+          - configure_xray
+          - install_node_and_app
+          - configure_app
+          - configure_routing
+        configure_routing:
+          commands:
+            01_run_envoy:
+              command: 
+                Fn::Sub: "bash appmesh-envoy.sh start --mesh ${ClusterName} --node frontend-ec2 --region ${AWS::Region}"
+              cwd: /home/ec2-user/appmesh-ecs-starter/application
+            02_enable_routing:
+              command: "bash appmesh-route.sh enable --app-ports 80"
+              cwd: /home/ec2-user/appmesh-ecs-starter/application
+        configure_app:
+          files:
+            /home/ec2-user/appmesh-ecs-starter/application/.env:
+              content: |
+                ENABLE_XRAY_TRACING=true
+                APP_TYPE=frontend
+                APP_VERSION=ec2
+                APP_PORT=80
+                APP_PATH=frontend
+                APP_BACKENDS=http://backend.appmesh-sample.lab:3000/backend;http://backend.appmesh-sample.lab:3000/backend
+                ACCESS_LOG_FILE=/var/log/frontend-access.log
+              mode: "000664"
+            /etc/systemd/system/frontend.service:
+              content: |
+                [Unit]
+                Description=frontend
+
+                [Service]
+                ExecStart=/home/ec2-user/appmesh-ecs-starter/application/app.js
+                Restart=always
+                User=root
+                Environment=PATH=/bin:/usr/bin:/usr/local/bin
+                WorkingDirectory=/home/ec2-user/appmesh-ecs-starter/application
+
+                [Install]
+                WantedBy=multi-user.target
+              mode: "000644"
+          services:
+            sysvinit:
+              frontend:
+                enabled: true 
+                ensureRunning: true
+        install_node_and_app:
+          commands:
+            01_download_rpm:
+              command: curl -sL https://rpm.nodesource.com/setup_12.x | sudo -E bash -
+            02_install_node:
+              command: yum install -y nodejs
+            03_download_app:
+              command: "git clone https://github.com/rimaulana/appmesh-ecs-starter"
+              cwd: /home/ec2-user
+            04_install_dependencies:
+              command: /bin/npm install --only=prod
+              cwd: /home/ec2-user/appmesh-ecs-starter/application
+            05_ensure_executable:
+              command: chmod +x /home/ec2-user/appmesh-ecs-starter/application/app.js
+            06_ensure_executable:
+              command: chmod +x /home/ec2-user/appmesh-ecs-starter/application/appmesh-route.sh
+            07_ensure_executable:
+              command: chmod +x /home/ec2-user/appmesh-ecs-starter/application/appmesh-envoy.sh
+          packages:
+            yum: 
+              gcc-c++: []
+              make: []
+              git: []
+        configure_xray:
+          commands:
+            01_download_xray_assets:
+              command:
+                Fn::Sub: "curl https://s3.${AWS::Region}.amazonaws.com/aws-xray-assets.${AWS::Region}/xray-daemon/aws-xray-daemon-3.x.rpm -o /home/ec2-user/xray.rpm"
+            02_install_xray:
+              command: yum install -y /home/ec2-user/xray.rpm
+            03_delete_xray_installer:
+              command: rm -rf /home/ec2-user/xray.rpm
+          services:
+            sysvinit:
+              xray:
+                enabled: true 
+                ensureRunning: true
+        configure_ecr_account:
+          commands:
+            01_generate_login:
+              command: 
+                Fn::Sub: "aws ecr get-login --registry-ids ${RegistryId} --no-include-email --region ${AWS::Region} > /home/ec2-user/ecr-login.sh"
+            02_configure_executeable:
+              command: chmod +x /home/ec2-user/ecr-login.sh
+            03_execute_login:
+              command: bash /home/ec2-user/ecr-login.sh
+            05_pull_envoy_image:
+              command: 
+                Fn::Sub: "docker pull ${RegistryId}.dkr.ecr.${AWS::Region}.amazonaws.com/aws-appmesh-envoy:${EnvoyImageTag}"
+            04_delete_script:
+              command: rm -rf /home/ec2-user/ecr-login.sh
+        configure_docker:
+          commands:
+            01_update_yum:
+              command: yum update -y
+            02_install_docker:
+              command: amazon-linux-extras install docker
+            03_configure_permission:
+              command: usermod -a -G docker ec2-user
+          services:
+            sysvinit:
+              docker:
+                enabled: true 
+                ensureRunning: true 
+    Properties:
+      AssociatePublicIpAddress: true 
+      IamInstanceProfile: !Ref WorkloadInstanceProfile
+      ImageId: !Ref AmiId
+      InstanceType: t3a.medium
+      KeyName: !Ref KeyName
+      SecurityGroups:
+        Fn::Split:
+          - ','
+          - !Ref SecurityGroupId
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 50
+            VolumeType: gp2
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            set -o xtrace
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource FrontendLaunchConfig --configsets install --region ${AWS::Region}
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource FrontendAutoScalingGroup --region ${AWS::Region}
+  
+  FrontendAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: "1"
+      LaunchConfigurationName: !Ref FrontendLaunchConfig
+      MinSize: "1"
+      MaxSize: "3"
+      VPCZoneIdentifier:
+        Fn::Split:
+        - ','
+        - !Ref SubnetIds
+      Tags:
+      - Key: Name
+        Value: !Sub "${ClusterName}-ec2-frontend"
+        PropagateAtLaunch: true
+      - Key: auto-delete
+        Value: "no"
+        PropagateAtLaunch: true
+      TargetGroupARNs:
+      - !Ref ALBTargetGroupArn
+    # CreationPolicy:
+    #   ResourceSignal:
+    #     Count: !Ref ProxyNumber
+    #     Timeout: PT10M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 5
