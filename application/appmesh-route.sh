@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
             shift
             shift
             ;;
-        --app-port)
+        --app-ports)
             APPMESH_APP_PORTS="$2"
             shift
             shift
