@@ -19,6 +19,8 @@ Parameters:
     Type: String
   BackendServiceDiscoveryArn:
     Type: String
+  BackendServiceDiscoveryId:
+    Type: String
   AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
@@ -53,16 +55,9 @@ Resources:
       - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
       - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+      - arn:aws:iam::aws:policy/AWSCloudMapRegisterInstanceAccess
+      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Policies:
-      - PolicyName: ServiceDiscoveryRegister
-        PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-          - Effect: Allow
-            Action:
-            - servicediscovery:RegisterInstance
-            Resource:
-            - !Ref BackendServiceDiscoveryArn
       - PolicyName: ServiceDiscoveryUpdateHealthCheck
         PolicyDocument:
           Version: '2012-10-17'
@@ -84,6 +79,58 @@ Resources:
           - install_node_and_app
           - configure_app
           - configure_routing
+          - service_discovery
+        service_discovery:
+          files:
+            /etc/systemd/system/sd.service:
+              mode: "000644"
+              content: |
+                [Unit]
+                Description=sd
+
+                [Service]
+                ExecStart=/etc/sd/health.sh
+                Restart=always
+                User=root
+
+                [Install]
+                WantedBy=multi-user.target
+            /etc/sd/health.sh:
+              mode: "000755"
+              content: 
+                Fn::Sub: |
+                  #!/bin/bash
+                  INSTANCE_ID=$(curl --max-time 3 --silent http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
+                  INTERNAL_IP=$(curl --max-time 3 --silent http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null)
+                  SERVICE_ID="${BackendServiceDiscoveryId}"
+                  REGION="${AWS::Region}"
+
+                  log(){
+                    echo "$1"
+                  }
+
+                  UPDATE_RESPONSE=""
+                  while [ 1 ]; do
+                    STATUS=$(curl -s -o /dev/null -I -w "%{http_code}" http://localhost:8080/health)
+                    if [[ $STATUS == "200" ]]; then
+                      log "service is healthy, updating service discovery instance"
+                      UPDATE_RESPONSE=$(aws servicediscovery update-instance-custom-health-status --service-id $SERVICE_ID --instance-id $INSTANCE_ID --status HEALTHY --region $REGION 2>&1)
+                    else
+                      log "service is NOT healthy, updating service discovery instance"
+                      UPDATE_RESPONSE=$(aws servicediscovery update-instance-custom-health-status --service-id $SERVICE_ID --instance-id $INSTANCE_ID --status UNHEALTHY --region $REGION 2>&1)
+                    fi
+
+                    if [[ $UPDATE_RESPONSE =~ .*ServiceNotFound.* ]]; then
+                      log "Creating service discovery instance"
+                      aws servicediscovery register-instance --service-id $SERVICE_ID --instance-id $INSTANCE_ID --region $REGION --attributes AWS_INIT_HEALTH_STATUS=UNHEALTHY,AWS_INSTANCE_IPV4=$INTERNAL_IP
+                    fi
+                    sleep 15
+                  done
+          services:
+            sysvinit:
+              sd:
+                enabled: true 
+                ensureRunning: true
         configure_routing:
           commands:
             01_run_envoy:
@@ -238,3 +285,7 @@ Resources:
       AutoScalingRollingUpdate:
         MinInstancesInService: 1
         MaxBatchSize: 5
+
+Outputs:
+  EC2BackendASGName:
+    Value: !Ref BackendAutoScalingGroup

@@ -12,7 +12,8 @@ ALLOW_SSH_FROM_CIDR ?= 0.0.0.0/0
 
 .PHONY: validate
 validate:
-	find . | grep yaml | xargs cfn-lint
+	cfn-lint infrastructure/*.yaml -i W2001
+	cfn-lint -i W2001 -t main.yaml
 
 .PHONY: upload
 upload: validate

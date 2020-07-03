@@ -20,34 +20,6 @@ Resources:
       Name: !Sub "${ClusterName}.lab"
       Vpc: !Ref VpcId
   
-  # FrontendEC2ServiceDiscoveryService:
-  #   Type: AWS::ServiceDiscovery::Service
-  #   Properties: 
-  #     Description: appmesh-sample EC2 frontend service discovery
-  #     DnsConfig:
-  #       DnsRecords: S
-  #       - TTL: 10
-  #         Type: A
-  #       RoutingPolicy: MULTIVALUE
-  #     HealthCheckCustomConfig: 
-  #       FailureThreshold: 1
-  #     Name: frontend-ec2
-  #     NamespaceId: !Ref ServiceDiscovery
-  
-  # FrontendECSServiceDiscoveryService:
-  #   Type: AWS::ServiceDiscovery::Service
-  #   Properties: 
-  #     Description: appmesh-sample ECS frontend service discovery
-  #     DnsConfig:
-  #       DnsRecords: 
-  #       - TTL: 10
-  #         Type: A
-  #       RoutingPolicy: MULTIVALUE
-  #     HealthCheckCustomConfig: 
-  #       FailureThreshold: 1
-  #     Name: frontend-ecs
-  #     NamespaceId: !Ref ServiceDiscovery
-  
   Backendv1ServiceDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
     Properties: 
@@ -96,14 +68,13 @@ Resources:
       ServiceId: !Ref BackendServiceDiscoveryService
 
 Outputs:
-  # ECSFrontendRegistryArn:
-  #   Value: !GetAtt FrontendECSServiceDiscoveryService.Arn
 
-  # EC2FrontendRegistryArn:
-  #   Value: !GetAtt FrontendEC2ServiceDiscoveryService.Arn
-  
   Backendv2RegistryArn:
     Value: !GetAtt Backendv2ServiceDiscoveryService.Arn
 
   Backendv1RegistryArn:
     Value: !GetAtt Backendv1ServiceDiscoveryService.Arn
+  
+  Backendv1ServiceId:
+    Value: !GetAtt Backendv1ServiceDiscoveryService.Id
+  

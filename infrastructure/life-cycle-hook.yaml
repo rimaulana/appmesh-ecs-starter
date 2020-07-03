@@ -1,0 +1,195 @@
+# Taken from https://aws.amazon.com/blogs/infrastructure-and-automation/run-code-before-terminating-an-ec2-auto-scaling-instance/
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  AutoScalingGN:
+    Type: String
+    Description: "(Required) Enter the name of the AutoScalingGroup."
+  HeartbeatTimeout:
+    Type: String
+    Default: '7200'
+    Description: "(Required) HeartbeatTimeout timeout in seconds."
+  CloudMapServiceId:
+    Type: String
+  CloudWatchEventDescription:
+    Type: String
+    Default: CloudWatch Event rule that will trigger AWS Systems Manager Automation
+      document when an instance go in Terminate:wait. This is created as a part of
+      a CloudFormation.
+    Description: "(Optional) The description of the CloudWatch Event rule"
+
+Resources:
+  CloudWatchEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - events.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:StartAutomationExecution
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${SSMAutomationDocument}:$DEFAULT
+        PolicyName: Start-SSM-Automation-Policy
+      - PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - iam:PassRole
+            Resource:
+              Fn::GetAtt:
+              - AutomationAssumeRole
+              - Arn
+        PolicyName: Pass-Role-SSM-Automation-Policy
+
+  AutomationAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ssm.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:DescribeInstanceInformation
+            - ssm:ListCommands
+            - ssm:ListCommandInvocations
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - ssm:SendCommand
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+          - Action:
+            - ssm:SendCommand
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ec2:*:*:instance/*
+            Effect: Allow
+        PolicyName: SSM-Automation-Policy
+      - PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - autoscaling:CompleteLifecycleAction
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AutoScalingGN}
+        PolicyName: SSM-Automation-Permission-to-CompleteLifecycle-Policy
+
+  TerminationLifeCycleHook:
+    Type: AWS::AutoScaling::LifecycleHook
+    Properties:
+      AutoScalingGroupName:
+        Ref: AutoScalingGN
+      DefaultResult: CONTINUE
+      HeartbeatTimeout:
+        Ref: HeartbeatTimeout
+      LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+
+  SSMAutomationDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: "{{AutomationAssumeRole}}"
+        description: This document will delete instance service discovery service instance and send a signal to the LifeCycleHook to terminate the
+          instance
+        parameters:
+          InstanceId:
+            type: String
+          ASGName:
+            type: String
+            default:
+              Ref: AutoScalingGN
+            description: The name of the AutoScaling Group.
+          LCHName:
+            type: String
+            default:
+              Ref: TerminationLifeCycleHook
+            description: The name of the Life Cycle Hook.
+          AWSRegion:
+            type: String
+            default:
+              Ref: AWS::Region
+          ServiceId:
+            type: String
+            default:
+              Ref: CloudMapServiceId
+          AutomationAssumeRole:
+            type: String
+            default:
+              Fn::GetAtt:
+              - AutomationAssumeRole
+              - Arn
+            description: "(Required) The ARN of the role that allows Automation to
+              perform the actions on your behalf."
+        mainSteps:
+        - name: RunCommand
+          action: aws:runCommand
+          inputs:
+            DocumentName: AWS-RunShellScript
+            InstanceIds:
+            - "{{ InstanceId }}"
+            Parameters:
+              executionTimeout: '7200'
+              commands:
+              - aws servicediscovery deregister-instance --service-id {{ServiceId}} --instance-id {{InstanceId}} --region {{AWSRegion}}
+        - name: TerminateTheInstance
+          action: aws:executeAwsApi
+          inputs:
+            Service: autoscaling
+            Api: CompleteLifecycleAction
+            AutoScalingGroupName: "{{ ASGName }}"
+            InstanceId: "{{ InstanceId }}"
+            LifecycleActionResult: CONTINUE
+            LifecycleHookName: "{{ LCHName }}"
+
+  CreateCloudWatchEvent:
+    Type: AWS::Events::Rule
+    Properties:
+      Description:
+        Ref: CloudWatchEventDescription
+      EventPattern:
+        source:
+        - aws.autoscaling
+        detail-type:
+        - EC2 Instance-terminate Lifecycle Action
+        detail:
+          AutoScalingGroupName:
+          - Ref: AutoScalingGN
+      Targets:
+      - Arn:
+          Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${SSMAutomationDocument}:$DEFAULT
+        RoleArn:
+          Fn::GetAtt:
+          - CloudWatchEventRole
+          - Arn
+        Id: TargetFunctionV1
+        InputTransformer:
+          InputPathsMap:
+            instanceid: "$.detail.EC2InstanceId"
+          InputTemplate:
+            Fn::Join:
+            - ''
+            - - '{"InstanceId":[<instanceid>]}'

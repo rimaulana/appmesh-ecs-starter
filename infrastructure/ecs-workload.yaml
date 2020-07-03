@@ -16,8 +16,6 @@ Parameters:
     Type: String
   ALBTargetGroupArn:
     Type: String
-  # FrontendServiceDiscoveryArn:
-  #   Type: String
   BackendServiceDiscoveryArn:
     Type: String
 

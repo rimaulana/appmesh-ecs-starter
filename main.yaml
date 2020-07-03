@@ -84,10 +84,6 @@ Resources:
           Fn::GetAtt:
           - Vpc
           - Outputs.ECSALBTargetGroupArn
-        # FrontendServiceDiscoveryArn:
-        #   Fn::GetAtt:
-        #   - CloudMap
-        #   - Outputs.ECSFrontendRegistryArn
         BackendServiceDiscoveryArn:
           Fn::GetAtt:
           - CloudMap
@@ -144,6 +140,10 @@ Resources:
           Fn::GetAtt:
           - CloudMap
           - Outputs.Backendv1RegistryArn
+        BackendServiceDiscoveryId:
+          Fn::GetAtt:
+          - CloudMap
+          - Outputs.Backendv1ServiceId
   
   Mesh:
     Type: AWS::CloudFormation::Stack
@@ -152,3 +152,18 @@ Resources:
         Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}appmesh.yaml'
       Parameters:
         ClusterName: !Ref ClusterName
+  
+  EC2BackendTerminationLifeCycleHook:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        Fn::Sub: 'https://${BucketName}.s3.${BucketRegion}.${AWS::URLSuffix}/${ClusterName}/${S3PrefixNameParameter}life-cycle-hook.yaml'
+      Parameters:
+        AutoScalingGN:
+          Fn::GetAtt:
+          - EC2Backend
+          - Outputs.EC2BackendASGName
+        CloudMapServiceId:
+          Fn::GetAtt:
+          - CloudMap
+          - Outputs.Backendv1ServiceId
