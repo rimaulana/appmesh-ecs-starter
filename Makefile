@@ -33,3 +33,9 @@ deploy: upload
 				S3PrefixNameParameter=$(S3_PREFIX) \
 				KeyName=$(EC2_KEY_NAME) \
 				AllowSSHFrom=$(ALLOW_SSH_FROM_CIDR)
+
+.PHONY: terminate
+terminate:
+	aws cloudformation delete-stack \
+		--stack-name $(STACK_NAME) \
+		--region $(STACK_REGION)
