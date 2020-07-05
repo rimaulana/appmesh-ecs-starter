@@ -28,6 +28,17 @@ Parameters:
   KeyName:
     Description: The EC2 Key Pair to allow SSH access to the instances
     Type: AWS::EC2::KeyPair::KeyName
+  HeartbeatTimeout:
+    Type: String
+    Default: '7200'
+    Description: "(Required) HeartbeatTimeout timeout in seconds."
+  CloudWatchEventDescription:
+    Type: String
+    Default: CloudWatch Event rule that will trigger AWS Systems Manager Automation
+      document when an instance go in Terminate:wait. This is created as a part of
+      a CloudFormation.
+    Description: "(Optional) The description of the CloudWatch Event rule"
+
 
 Resources:
 
@@ -120,9 +131,9 @@ Resources:
                       UPDATE_RESPONSE=$(aws servicediscovery update-instance-custom-health-status --service-id $SERVICE_ID --instance-id $INSTANCE_ID --status UNHEALTHY --region $REGION 2>&1)
                     fi
 
-                    if [[ $UPDATE_RESPONSE =~ .*ServiceNotFound.* ]]; then
+                    if [[ $UPDATE_RESPONSE =~ .*(ServiceNotFound|InstanceNotFound).* ]]; then
                       log "Creating service discovery instance"
-                      aws servicediscovery register-instance --service-id $SERVICE_ID --instance-id $INSTANCE_ID --region $REGION --attributes AWS_INIT_HEALTH_STATUS=UNHEALTHY,AWS_INSTANCE_IPV4=$INTERNAL_IP
+                      aws servicediscovery register-instance --service-id $SERVICE_ID --instance-id $INSTANCE_ID --region $REGION --attributes AWS_INSTANCE_IPV4=$INTERNAL_IP
                     fi
                     sleep 15
                   done
@@ -260,8 +271,15 @@ Resources:
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource BackendAutoScalingGroup --region ${AWS::Region}
   
   BackendAutoScalingGroup:
+    DependsOn:
+    - CloudWatchEventRole
+    - AutomationAssumeRole
+    - SSMAutomationDocument
+    - CreateCloudWatchEvent
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
+      AutoScalingGroupName:
+        Fn::Sub: "${ClusterName}-ec2-backend-asg"
       DesiredCapacity: "1"
       LaunchConfigurationName: !Ref BackendLaunchConfig
       MinSize: "1"
@@ -270,6 +288,13 @@ Resources:
         Fn::Split:
         - ','
         - !Ref SubnetIds
+      LifecycleHookSpecificationList:
+      - DefaultResult: CONTINUE
+        HeartbeatTimeout: 
+          Ref: HeartbeatTimeout
+        LifecycleHookName: 
+          Fn::Sub: "${ClusterName}-ec2-backend-lifecycle-hook"
+        LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
       Tags:
       - Key: Name
         Value: !Sub "${ClusterName}-ec2-backend"
@@ -285,7 +310,169 @@ Resources:
       AutoScalingRollingUpdate:
         MinInstancesInService: 1
         MaxBatchSize: 5
+  
+# Life Cycle Hook configuration making sure CloudMap instance is removed when backend instance is terminated
+  CloudWatchEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - events.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:StartAutomationExecution
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${SSMAutomationDocument}:$DEFAULT
+        PolicyName: Start-SSM-Automation-Policy
+      - PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - iam:PassRole
+            Resource:
+              Fn::GetAtt:
+              - AutomationAssumeRole
+              - Arn
+        PolicyName: Pass-Role-SSM-Automation-Policy
 
-Outputs:
-  EC2BackendASGName:
-    Value: !Ref BackendAutoScalingGroup
+  AutomationAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ssm.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:DescribeInstanceInformation
+            - ssm:ListCommands
+            - ssm:ListCommandInvocations
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - ssm:SendCommand
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+          - Action:
+            - ssm:SendCommand
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ec2:*:*:instance/*
+            Effect: Allow
+        PolicyName: SSM-Automation-Policy
+      - PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - autoscaling:CompleteLifecycleAction
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${ClusterName}-ec2-backend-asg
+        PolicyName: SSM-Automation-Permission-to-CompleteLifecycle-Policy
+    
+  SSMAutomationDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: "{{AutomationAssumeRole}}"
+        description: This document will delete instance service discovery service instance and send a signal to the LifeCycleHook to terminate the
+          instance
+        parameters:
+          InstanceId:
+            type: String
+          ASGName:
+            type: String
+            default:
+              Fn::Sub: "${ClusterName}-ec2-backend-asg"
+            description: The name of the AutoScaling Group.
+          LCHName:
+            type: String
+            default:
+              Fn::Sub: "${ClusterName}-ec2-backend-lifecycle-hook"
+            description: The name of the Life Cycle Hook.
+          AWSRegion:
+            type: String
+            default:
+              Ref: AWS::Region
+          ServiceId:
+            type: String
+            default:
+              Ref: BackendServiceDiscoveryId
+          AutomationAssumeRole:
+            type: String
+            default:
+              Fn::GetAtt:
+              - AutomationAssumeRole
+              - Arn
+            description: "(Required) The ARN of the role that allows Automation to
+              perform the actions on your behalf."
+        mainSteps:
+        - name: RunCommand
+          action: aws:runCommand
+          inputs:
+            DocumentName: AWS-RunShellScript
+            InstanceIds:
+            - "{{ InstanceId }}"
+            Parameters:
+              executionTimeout: '7200'
+              commands:
+              - aws servicediscovery deregister-instance --service-id {{ServiceId}} --instance-id {{InstanceId}} --region {{AWSRegion}}
+        - name: TerminateTheInstance
+          action: aws:executeAwsApi
+          inputs:
+            Service: autoscaling
+            Api: CompleteLifecycleAction
+            AutoScalingGroupName: "{{ ASGName }}"
+            InstanceId: "{{ InstanceId }}"
+            LifecycleActionResult: CONTINUE
+            LifecycleHookName: "{{ LCHName }}"
+
+  CreateCloudWatchEvent:
+    Type: AWS::Events::Rule
+    Properties:
+      Description:
+        Ref: CloudWatchEventDescription
+      EventPattern:
+        source:
+        - aws.autoscaling
+        detail-type:
+        - EC2 Instance-terminate Lifecycle Action
+        detail:
+          AutoScalingGroupName:
+          - Fn::Sub: "${ClusterName}-ec2-backend-asg"
+      Targets:
+      - Arn:
+          Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${SSMAutomationDocument}:$DEFAULT
+        RoleArn:
+          Fn::GetAtt:
+          - CloudWatchEventRole
+          - Arn
+        Id: TargetFunctionV1
+        InputTransformer:
+          InputPathsMap:
+            instanceid: "$.detail.EC2InstanceId"
+          InputTemplate:
+            Fn::Join:
+            - ''
+            - - '{"InstanceId":[<instanceid>]}'
